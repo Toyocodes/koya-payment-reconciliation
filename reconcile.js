@@ -5,14 +5,43 @@
 
 const fs = require("fs");
 
+// Amounts may be numbers or strings with thousands separators, e.g. "4,804.15".
+function parseAmount(value) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number(value.replace(/,/g, "").trim());
+  return NaN;
+}
+
+// Keep only the latest attempt (by timestamp) for each txn_id.
+const latest = new Map();
+
+// File has CRLF line endings; split on either.
+const lines = fs.readFileSync("payments.jsonl", "utf8").split(/\r?\n/);
+for (const line of lines) {
+  if (line.trim() === "") continue;
+
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    continue; // Ignore lines that can't be read.
+  }
+  if (event === null || typeof event !== "object") continue;
+  if (!event.txn_id) continue; // Ignore events without a txn_id.
+
+  const ts = Date.parse(event.ts);
+  const current = latest.get(event.txn_id);
+  if (!current || ts > current.ts) {
+    latest.set(event.txn_id, { ts, status: event.status, amount: parseAmount(event.amount) });
+  }
+}
+
 let total = 0;
 let count = 0;
 
-const lines = fs.readFileSync("payments.jsonl", "utf8").split("\n").filter((l) => l.length > 0);
-for (const line of lines) {
-  const event = JSON.parse(line);
-  if (event.status === "success") {
-    total += Number(event.amount);
+for (const payment of latest.values()) {
+  if (payment.status === "success") {
+    total += payment.amount;
     count += 1;
   }
 }
